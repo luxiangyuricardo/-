@@ -1,0 +1,127 @@
+import pymysql as mysql
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from datetime import datetime
+con = mysql.connect(user='root', 
+                      passwd='lls970331',
+                      host='127.0.0.1',		# 服务器地址
+                      port=3306,			# 数据库端口
+                      database='experiment'		# 要连接的数据库
+             )
+cursor = con.cursor()
+
+# 获取上次运行时间
+cursor.execute("SELECT MAX(run_time) FROM run_logs")
+last_run_time = cursor.fetchone()[0]
+
+# 定义分类映射
+category_mapping = {
+    '英文表名': ('所属大类名', '中文表名')
+    #根据数据库表数量重复上述语句
+}
+
+# 记录当前运行时间
+current_run_time = datetime.now()
+# 创建一个空的字典
+table_info = {}
+# 获取所有表名
+cursor.execute("SHOW TABLES")
+tables = [table[0] for table in cursor.fetchall()]
+# 遍历每个表
+for table in tables:
+    # 获取表的字段名
+    cursor.execute(f"SHOW COLUMNS FROM {table}")
+    fields = [column[0] for column in cursor.fetchall()]
+
+    # 获取表的总行数
+    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+    total_rows = cursor.fetchone()[0]
+
+    '''# 获取表的最近更新时间
+    cursor.execute(f"SELECT MAX(updated_at) FROM {table}")
+    latest_update = cursor.fetchone()[0]
+
+    # 将结果存储在字典中
+    table_info[table] = (fields, total_rows, latest_update)
+'''
+    
+     # 检查是否存在updated_at列
+    if 'updated_at' in fields:
+        # 获取表的最近更新时间
+        cursor.execute(f"SELECT MAX(updated_at) FROM {table}")
+        latest_update = cursor.fetchone()[0]
+    else:
+        latest_update = 'N/A'  # 如果没有updated_at列，设置为N/A
+
+    # 查询新增的条目数
+    if last_run_time and 'updated_at' in fields:
+        cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE updated_at > '{last_run_time}'")
+        new_rows = cursor.fetchone()[0]
+    else:
+        new_rows = 'N/A'  # 如果没有上次运行时间或updated_at列，设置为N/A
+
+    # 将结果存储在字典中
+    table_info[table] = (fields, total_rows, new_rows, latest_update)
+    
+# 创建包含分类信息的DataFrame
+df = pd.DataFrame([
+    {
+        '英文表名': table,
+        '类别': category_mapping.get(table, ('未知', '未知'))[0],
+        '中文表名': category_mapping.get(table, ('未知', '未知'))[1],
+        '所含字段': ', '.join(fn),
+        '数据条目个数': count,
+        '较上次新增条目数': new_rows,
+        '最近更新于': last_update
+        
+    }
+    for table, (fn, count, new_rows, last_update) in table_info.items()
+])
+  # 设置MultiIndex
+df.set_index(['类别', '中文表名', '英文表名'], inplace=True)
+
+# 对DataFrame进行排序
+df.sort_index(level=['类别', '中文表名'], inplace=True)
+
+# 重置索引以便处理合并
+df.reset_index(inplace=True)
+
+# 创建一个Excel工作簿
+wb = Workbook()
+ws = wb.active
+ws.title = 'Table Info'
+
+# 写入DataFrame到Excel
+for row in dataframe_to_rows(df, index=False, header=True):
+    ws.append(row)
+
+# 合并单元格
+start_row = 2
+current_category = None
+
+for row in ws.iter_rows(min_row=2, max_col=1):
+    cell = row[0]
+    if cell.value != current_category:
+        if current_category is not None and start_row < cell.row:
+            ws.merge_cells(start_row=start_row, start_column=1, end_row=cell.row-1, end_column=1)
+        start_row = cell.row
+        current_category = cell.value
+
+# 处理最后一个分组
+if current_category is not None:
+    ws.merge_cells(start_row=start_row, start_column=1, end_row=cell.row, end_column=1)
+
+# 保存为Excel文件
+wb.save('mysql_whitebook2.xlsx')
+
+# 记录当前运行时间到日志表
+cursor.execute("INSERT INTO run_logs (run_time) VALUES (%s)", (current_run_time,))
+con.commit()
+
+# 关闭游标和数据库连接
+cursor.close()
+con.close()
+
+print("Excel文件已成功生成")
+  
