@@ -3,11 +3,11 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from datetime import datetime
-con = mysql.connect(user='root', 
-                      passwd='lls970331',
+con = mysql.connect(user='root',      #改成自己的数据库用户名
+                      passwd='xxxxx', #改成自己的数据库密码
                       host='127.0.0.1',		# 服务器地址
                       port=3306,			# 数据库端口
-                      database='experiment'		# 要连接的数据库
+                      database='experiment'		#改成要连接的数据库
              )
 cursor = con.cursor()
 
